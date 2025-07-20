@@ -1,1 +1,3 @@
 /web-app/config.go
+/client/*.json
+/client/config.go
