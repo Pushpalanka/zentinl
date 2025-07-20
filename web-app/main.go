@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	oidc2 "github.com/zitadel/oidc/v3/pkg/oidc"
 	"golang.org/x/exp/slog"
 	"html/template"
 	"io"
@@ -41,6 +42,32 @@ func main() {
 	mw := authentication.Middleware(authN)
 
 	mux := http.NewServeMux()
+	registerRoutes(mux, authN, mw, t)
+
+	serverAddr := fmt.Sprintf(":%s", *port)
+	slog.Info("Server starting", "addr", serverAddr)
+
+	server := &http.Server{
+		Addr:    serverAddr,
+		Handler: mux,
+	}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			slog.Error("Server error", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-ctx.Done()
+	slog.Info("Shutdown signal received, stopping server...")
+
+	if err := server.Shutdown(context.Background()); err != nil {
+		slog.Error("Server shutdown error", "error", err)
+	}
+}
+
+func registerRoutes(mux *http.ServeMux, authN *authentication.Authenticator[*oidc.UserInfoContext[*oidc2.IDTokenClaims, *oidc2.UserInfo]], mw *authentication.Interceptor[*oidc.UserInfoContext[*oidc2.IDTokenClaims, *oidc2.UserInfo]], t *template.Template) {
 	mux.Handle("/auth/", authN)
 
 	mux.Handle("/", mw.CheckAuthentication()(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -78,55 +105,22 @@ func main() {
 			client := http.Client{}
 			resp, err := client.Do(apiReq)
 			if err != nil {
-				http.Error(w, "Failed to call protected API", http.StatusBadGateway)
+				http.Error(w, err.Error(), http.StatusBadGateway)
 				return
 			}
 			defer resp.Body.Close()
 
-			combinedJSON, err := getResponse(w, err, resp)
-			print(combinedJSON)
-			if err != nil {
-				return
-			}
-
-			_, err = w.Write(combinedJSON)
-			if err != nil {
+			if err := writeResponse(w, resp); err != nil {
 				slog.Error("Failed to write response", "error", err)
 			}
 		})))
-
-	serverAddr := fmt.Sprintf(":%s", *port)
-	slog.Info("Server starting", "addr", serverAddr)
-
-	server := &http.Server{
-		Addr:    serverAddr,
-		Handler: mux,
-	}
-
-	go func() {
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			slog.Error("Server error", "error", err)
-			os.Exit(1)
-		}
-	}()
-
-	<-ctx.Done()
-	slog.Info("Shutdown signal received, stopping server...")
-
-	if err := server.Shutdown(context.Background()); err != nil {
-		slog.Error("Server shutdown error", "error", err)
-	}
 }
 
-func getResponse(w http.ResponseWriter, err error, resp *http.Response) ([]byte, error) {
+func writeResponse(w http.ResponseWriter, resp *http.Response) error {
 	bodyBytes, err := io.ReadAll(resp.Body)
 	if err != nil {
-		http.Error(w, "Failed to read response body", http.StatusInternalServerError)
-		return nil, err
+		return err
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
 
 	response := map[string]interface{}{
 		"status": resp.StatusCode,
@@ -135,8 +129,11 @@ func getResponse(w http.ResponseWriter, err error, resp *http.Response) ([]byte,
 
 	combinedJSON, err := json.Marshal(response)
 	if err != nil {
-		http.Error(w, "Failed to marshal combined response", http.StatusInternalServerError)
-		return nil, err
+		return err
 	}
-	return combinedJSON, nil
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+	_, err = w.Write(combinedJSON)
+	return err
 }

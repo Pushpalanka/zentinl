@@ -6,17 +6,16 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net/http"
-	"os"
-
-	"golang.org/x/exp/slog"
-
 	"github.com/zitadel/zitadel-go/v3/pkg/authorization"
 	"github.com/zitadel/zitadel-go/v3/pkg/authorization/oauth"
 	"github.com/zitadel/zitadel-go/v3/pkg/client"
 	"github.com/zitadel/zitadel-go/v3/pkg/client/zitadel/auth"
 	"github.com/zitadel/zitadel-go/v3/pkg/http/middleware"
 	"github.com/zitadel/zitadel-go/v3/pkg/zitadel"
+	"golang.org/x/exp/slog"
+	"net/http"
+	"os"
+	"slices"
 )
 
 func main() {
@@ -54,7 +53,7 @@ func main() {
 			}
 		}))
 
-	// This endpoint is only accessible with a valid authorization (in this case a valid access_token / PAT).
+	// This endpoint is only accessible with a valid authorization (in this case when "project.grant.member.read" permission is granted).
 	// It will call ZITADEL to additionally get all permissions granted to the user in ZITADEL and return that.
 	router.Handle("/api/permissions", mw.RequireAuthorization()(http.HandlerFunc(
 		func(w http.ResponseWriter, r *http.Request) {
@@ -69,13 +68,16 @@ func main() {
 				return
 			}
 
+			if !isAllowed(w, resp) {
+				return
+			}
+
 			err = jsonResponse(w, resp.Result, http.StatusOK)
 			if err != nil {
 				slog.Error("error writing response", "error", err)
 			}
 		})))
 
-	// start the server on the specified port
 	lis := fmt.Sprintf(":%s", *port)
 	slog.Info("server listening, press ctrl+c to stop", "addr", "http://localhost"+lis)
 	err = http.ListenAndServe(lis, router)
@@ -85,13 +87,20 @@ func main() {
 	}
 }
 
-func jsonResponse(w http.ResponseWriter, resp any, status int) error {
-	w.Header().Set("content-type", "application/json")
-	w.WriteHeader(status)
-	data, err := json.Marshal(resp)
-	if err != nil {
-		return err
+func isAllowed(w http.ResponseWriter, resp *auth.ListMyZitadelPermissionsResponse) bool {
+	if !slices.Contains(resp.Result, "project.grant.member.read") {
+		err := jsonResponse(w, map[string]string{"error": "Forbidden: missing 'project.grant.member.read'"}, http.StatusForbidden)
+		if err != nil {
+			slog.Error("error writing error response", "error", err)
+			return false
+		}
+		return false
 	}
-	_, err = w.Write(data)
-	return err
+	return true
+}
+
+func jsonResponse(w http.ResponseWriter, resp any, status int) error {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	return json.NewEncoder(w).Encode(resp)
 }
