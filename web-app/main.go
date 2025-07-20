@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"golang.org/x/exp/slog"
 	"html/template"
-	"log"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -27,14 +27,16 @@ func main() {
 
 	t, err := template.ParseFS(templates, "templates/*.html")
 	if err != nil {
-		log.Fatalf("template error: %v", err)
+		slog.Error("template error: %v", err)
+		os.Exit(1)
 	}
 
 	authN, err := authentication.New(ctx, zitadel.New(*domain), *key,
 		oidc.DefaultAuthentication(*clientID, *redirectURI, *key),
 	)
 	if err != nil {
-		log.Fatalf("auth init error: %v", err)
+		slog.Error("Failed to initialize ZITADEL authentication", "error", err)
+		os.Exit(1)
 	}
 	mw := authentication.Middleware(authN)
 
@@ -65,6 +67,34 @@ func main() {
 		}
 	})))
 
+	mux.Handle("/call-api", mw.CheckAuthentication()(http.HandlerFunc(
+		func(w http.ResponseWriter, r *http.Request) {
+			authCtx := mw.Context(r.Context())
+			token := authCtx.GetTokens().AccessToken
+
+			apiReq, _ := http.NewRequest("GET", "http://localhost:8090/api/permissions", nil)
+			apiReq.Header.Set("Authorization", "Bearer "+token)
+
+			client := http.Client{}
+			resp, err := client.Do(apiReq)
+			if err != nil {
+				http.Error(w, "Failed to call protected API", http.StatusBadGateway)
+				return
+			}
+			defer resp.Body.Close()
+
+			combinedJSON, err := getResponse(w, err, resp)
+			print(combinedJSON)
+			if err != nil {
+				return
+			}
+
+			_, err = w.Write(combinedJSON)
+			if err != nil {
+				slog.Error("Failed to write response", "error", err)
+			}
+		})))
+
 	serverAddr := fmt.Sprintf(":%s", *port)
 	slog.Info("Server starting", "addr", serverAddr)
 
@@ -86,4 +116,27 @@ func main() {
 	if err := server.Shutdown(context.Background()); err != nil {
 		slog.Error("Server shutdown error", "error", err)
 	}
+}
+
+func getResponse(w http.ResponseWriter, err error, resp *http.Response) ([]byte, error) {
+	bodyBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		http.Error(w, "Failed to read response body", http.StatusInternalServerError)
+		return nil, err
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(resp.StatusCode)
+
+	response := map[string]interface{}{
+		"status": resp.StatusCode,
+		"data":   json.RawMessage(bodyBytes),
+	}
+
+	combinedJSON, err := json.Marshal(response)
+	if err != nil {
+		http.Error(w, "Failed to marshal combined response", http.StatusInternalServerError)
+		return nil, err
+	}
+	return combinedJSON, nil
 }

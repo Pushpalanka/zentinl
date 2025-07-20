@@ -6,5 +6,28 @@
 
 <h2>User Info</h2>
 <pre>{{ . }}</pre>
+
+<h2>Call Protected API</h2>
+<button id="callApiBtn">Call API</button>
+
+<pre id="api-response"></pre>
+
+<script>
+    document.getElementById("callApiBtn").addEventListener("click", async () => {
+        const res = await fetch("/call-api", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+        });
+
+        if (!res.ok) {
+            document.getElementById("api-response").textContent = "API call failed: " + res.status;
+            return;
+        }
+
+        const data = await res.json();
+        document.getElementById("api-response").textContent = JSON.stringify(data, null, 2);
+    });
+</script>
 </body>
 </html>
