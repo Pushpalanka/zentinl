@@ -1,7 +1,6 @@
 # Zentinl
 
-Zentinl demonstrates performing user authentication based on OIDC standard using ZITADEL Identity Cloud in a web application, 
-followed by consuming a protected API endpoint. (This is an extracted version from the [ZITADEL examples](https://github.com/zitadel/zitadel-go/tree/next/example)
+Zentinl demonstrates user authentication in a web application using the OpenID Connect (OIDC) standard, powered by ZITADEL Identity Cloud, followed by secure access to a protected API endpoint. This example is adapted from the official [ZITADEL examples](https://github.com/zitadel/zitadel-go/tree/next/example)
 
 ## Overview
 ![overview.png](overview.png)
