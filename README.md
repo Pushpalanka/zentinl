@@ -4,7 +4,11 @@ Zentinl demonstrates performing user authentication based on OIDC standard using
 followed by consuming a protected API endpoint. (This is an extracted version from the [ZITADEL examples](https://github.com/zitadel/zitadel-go/tree/next/example)
 
 ## Overview
-<diagram>
+![overview.png](overview.png)
+
+Web application serves as a front end for the users and has a backend to interact with the ZITADEL Identity Cloud and other required APIs.
+The API provides a protected resource that requires authorization with `project.grant.member.read` permission. This is enforced at API itself 
+by checking the JWT token provided by the application on behalf of the logged in user.
 
 ## How to configure
 ### User Authentication for Web application
